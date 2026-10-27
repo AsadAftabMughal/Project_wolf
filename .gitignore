@@ -2,3 +2,10 @@
 .venv/
 __pycache__/
 *.log
+*.pem
+*.key
+id_*
+*.pub
+.env*
+*.sqlite
+*.db
