@@ -73,6 +73,28 @@ class FakeBroker(Broker):
                                         order.stop_loss, tp)
         return OrderResult(True, pid, fill, None)
 
+    def tick(self, bid, ask, time_utc):
+        """Move the market and close any position whose stop or target is hit.
+
+        Exits happen at the new quote, so a gap past the stop loses more
+        than planned.
+        """
+        self.set_quote(bid, ask, time_utc)
+        closed = []
+        for pid, pos in list(self._positions.items()):
+            buy = pos.side == "buy"
+            price = self._quote.bid if buy else self._quote.ask
+            if buy:
+                hit_stop = price <= pos.stop_loss
+                hit_target = pos.take_profit is not None and price >= pos.take_profit
+            else:
+                hit_stop = price >= pos.stop_loss
+                hit_target = pos.take_profit is not None and price <= pos.take_profit
+            if hit_stop or hit_target:
+                pnl = self.close_position(pid)
+                closed.append((pid, pnl, "STOP" if hit_stop else "TARGET"))
+        return closed
+
     def close_position(self, position_id):
         pos = self._positions.pop(position_id)  # KeyError if unknown
         buy = pos.side == "buy"
