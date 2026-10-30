@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
+from wolf import killswitch
 from wolf.broker.base import Broker, OrderRequest
 from wolf.core.risk_gate import Proposal, check
 from wolf.core.sizing import position_size
@@ -14,7 +15,7 @@ class Signal:
     side: str  # "buy" or "sell"
     stop_distance: Decimal
     target_distance: Decimal
-    when_utc: datetime
+    when_utc: datetime  # treated as "now": live code must pass the current UTC time
 
 
 @dataclass(frozen=True)
@@ -26,10 +27,19 @@ class Outcome:
     fill_price: Optional[Decimal] = None
 
 
-def execute(broker: Broker, cfg, state, signal: Signal) -> Outcome:
-    """Size, gate, then order. Nothing reaches the broker unless every step passes."""
+def execute(broker: Broker, cfg, state, signal: Signal,
+            kill_switch_path=None) -> Outcome:
+    """Kill file, state check, size, quote check, gate, then order.
+
+    Nothing reaches the broker unless every step passes.
+    """
     if signal.side not in ("buy", "sell"):
         raise ValueError("side must be buy or sell")
+    if signal.when_utc.tzinfo is None:
+        raise ValueError("when_utc must be timezone-aware UTC")
+
+    if kill_switch_path is not None and killswitch.is_engaged(kill_switch_path):
+        return Outcome("BLOCKED", ("KILL_SWITCH",))
 
     # Our bookkeeping must match the broker's reality, or we do nothing.
     if len(broker.positions()) != state.open_positions:
@@ -42,13 +52,18 @@ def execute(broker: Broker, cfg, state, signal: Signal) -> Outcome:
     if lots is None:
         return Outcome("SKIPPED_SIZE", ("MIN_LOT_RISKS_TOO_MUCH",))
 
-    decision = check(cfg, state, Proposal(lots, signal.stop_distance,
-                                          signal.target_distance,
-                                          spec.value_per_unit, signal.when_utc))
+    q = broker.quote(signal.symbol)
+    if q.time_utc.tzinfo is None:
+        raise ValueError("quote time must be timezone-aware")
+    spread = q.ask - q.bid
+    age = Decimal(str((signal.when_utc - q.time_utc).total_seconds()))
+
+    decision = check(cfg, state, Proposal(
+        lots, signal.stop_distance, signal.target_distance,
+        spec.value_per_unit, signal.when_utc, spread, age))
     if not decision.allowed:
         return Outcome("BLOCKED", decision.reasons, lots=lots)
 
-    q = broker.quote(signal.symbol)
     if signal.side == "buy":
         entry = q.ask
         stop = entry - signal.stop_distance

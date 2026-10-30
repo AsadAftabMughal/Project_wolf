@@ -10,3 +10,4 @@ id_*
 *.sqlite
 *.db
 !.env.example
+state/

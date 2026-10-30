@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from decimal import Decimal
+from typing import Optional
 
 @dataclass(frozen=True)
 class RiskConfig:
@@ -12,6 +13,8 @@ class RiskConfig:
     # UTC windows. London shifts by an hour with daylight saving; fix later with zoneinfo.
     windows_utc: tuple = ((time(7, 0), time(11, 0)), (time(12, 30), time(16, 0)))
     friday_cutoff_utc: time = time(14, 0)
+    max_spread: Decimal = Decimal("0.60")  # placeholder: measure real gold spreads first
+    max_quote_age_seconds: Decimal = Decimal("5")
 
 @dataclass(frozen=True)
 class AccountState:
@@ -28,6 +31,8 @@ class Proposal:
     target_distance: Decimal
     value_per_unit: Decimal
     when_utc: datetime
+    spread: Optional[Decimal] = None             # None means unknown, which blocks
+    quote_age_seconds: Optional[Decimal] = None  # None means unknown, which blocks
 
 @dataclass(frozen=True)
 class Decision:
@@ -53,6 +58,11 @@ def check(cfg, state, p):
         r.append("MAX_OPEN")
     if p.target_distance / p.stop_distance < cfg.min_reward_risk:
         r.append("REWARD_RISK")
+    if p.spread is None or p.spread < 0 or p.spread > cfg.max_spread:
+        r.append("SPREAD_TOO_WIDE")
+    if (p.quote_age_seconds is None or p.quote_age_seconds < 0
+            or p.quote_age_seconds > cfg.max_quote_age_seconds):
+        r.append("QUOTE_STALE")
     t = p.when_utc.time()
     in_window = p.when_utc.weekday() < 5 and any(a <= t < b for a, b in cfg.windows_utc)
     if not in_window:

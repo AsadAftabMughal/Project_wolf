@@ -21,19 +21,19 @@ class FakeBroker(Broker):
     """
 
     def __init__(self, account_id="demo-1", balance="300",
-                 bid="2000.00", ask="2000.30", spec=None):
+                 bid="2000.00", ask="2000.30", spec=None, quote_time=None):
         self._account_id = account_id
         self._balance = _d(balance)
         self._spec = spec or SymbolSpec("XAUUSD", _d("0.01"), _d("0.01"),
                                         _d("5"), _d("100"))
         self._quote = Quote(self._spec.symbol, _d(bid), _d(ask),
-                            datetime.now(timezone.utc))
+                            quote_time or datetime.now(timezone.utc))
         self._positions = {}
         self._ids = itertools.count(1)
 
-    def set_quote(self, bid, ask):
+    def set_quote(self, bid, ask, time_utc=None):
         self._quote = Quote(self._spec.symbol, _d(bid), _d(ask),
-                            datetime.now(timezone.utc))
+                            time_utc or self._quote.time_utc)
 
     def account(self):
         return AccountInfo(self._account_id, self._balance, self._balance)

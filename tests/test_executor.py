@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal as D
 import pytest
 from wolf.broker.base import OrderResult
@@ -32,7 +32,7 @@ class Rejecting(Spy):
 
 
 def broker(balance="1000"):
-    return Spy(balance=balance)
+    return Spy(balance=balance, quote_time=TUE_0800 - timedelta(seconds=1))
 
 
 def test_buy_is_sized_and_levels_are_set():
@@ -85,7 +85,7 @@ def test_small_account_skips_instead_of_sizing_up():
 
 
 def test_broker_rejection_is_reported():
-    b = Rejecting(balance="1000")
+    b = Rejecting(balance="1000", quote_time=TUE_0800 - timedelta(seconds=1))
     out = execute(b, CFG, STATE, SIG)
     assert out.status == "REJECTED"
     assert out.reasons == ("NOPE",)
@@ -119,3 +119,36 @@ def test_loss_at_stop_stays_within_one_percent():
     out = execute(b, CFG, STATE, SIG)
     b.set_quote("1997.30", "1997.60")
     assert b.close_position(out.position_id) >= D("-10")
+
+
+def test_wide_spread_blocks_before_order():
+    b = Spy(balance="1000", ask="2001.00",
+            quote_time=TUE_0800 - timedelta(seconds=1))
+    out = execute(b, CFG, STATE, SIG)
+    assert out.status == "BLOCKED"
+    assert "SPREAD_TOO_WIDE" in out.reasons
+    assert b.placed == 0
+
+
+def test_stale_quote_blocks_before_order():
+    b = Spy(balance="1000", quote_time=TUE_0800 - timedelta(seconds=30))
+    out = execute(b, CFG, STATE, SIG)
+    assert out.status == "BLOCKED"
+    assert "QUOTE_STALE" in out.reasons
+    assert b.placed == 0
+
+
+def test_kill_switch_file_blocks(tmp_path):
+    f = tmp_path / "KILL"
+    f.write_text("manual")
+    b = broker()
+    out = execute(b, CFG, STATE, SIG, kill_switch_path=str(f))
+    assert out.status == "BLOCKED"
+    assert out.reasons == ("KILL_SWITCH",)
+    assert b.placed == 0
+
+
+def test_no_kill_file_allows_trade(tmp_path):
+    b = broker()
+    out = execute(b, CFG, STATE, SIG, kill_switch_path=str(tmp_path / "KILL"))
+    assert out.status == "PLACED"

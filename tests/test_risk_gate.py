@@ -8,7 +8,8 @@ CFG = RiskConfig()
 STATE = AccountState(balance=D("1000"), daily_pnl=D("0"), trades_today=0, open_positions=0)
 TUE_0800 = datetime(2026, 11, 3, 8, 0, tzinfo=timezone.utc)
 PROP = Proposal(lots=D("0.03"), stop_distance=D("3"), target_distance=D("6"),
-                value_per_unit=D("100"), when_utc=TUE_0800)
+                value_per_unit=D("100"), when_utc=TUE_0800,
+                spread=D("0.30"), quote_age_seconds=D("1"))
 
 def reasons(state=STATE, prop=PROP):
     return set(check(CFG, state, prop).reasons)
@@ -61,3 +62,28 @@ def test_naive_time_rejected():
 def test_bad_stop_rejected():
     with pytest.raises(ValueError):
         check(CFG, STATE, replace(PROP, stop_distance=D("0")))
+
+
+def test_spread_too_wide():
+    assert reasons(prop=replace(PROP, spread=D("0.61"))) == {"SPREAD_TOO_WIDE"}
+
+
+def test_spread_at_limit_passes():
+    assert reasons(prop=replace(PROP, spread=D("0.60"))) == set()
+
+
+def test_unknown_spread_blocks():
+    assert reasons(prop=replace(PROP, spread=None)) == {"SPREAD_TOO_WIDE"}
+
+
+def test_stale_quote():
+    assert reasons(prop=replace(PROP, quote_age_seconds=D("6"))) == {"QUOTE_STALE"}
+
+
+def test_quote_age_at_limit_passes():
+    assert reasons(prop=replace(PROP, quote_age_seconds=D("5"))) == set()
+
+
+def test_unknown_or_future_quote_blocks():
+    assert reasons(prop=replace(PROP, quote_age_seconds=None)) == {"QUOTE_STALE"}
+    assert reasons(prop=replace(PROP, quote_age_seconds=D("-1"))) == {"QUOTE_STALE"}
